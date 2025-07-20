@@ -1,170 +1,218 @@
 import pygame
 from pygame import *
-from random import randint
-from time import time as timer
 
-win_width = 1300
-win_height = 700
-window = display.set_mode((win_width, win_height))
+pygame.init()
 
-display.set_caption('Shooter')
-#display.set_icon()
+win_size = 600
+window = pygame.display.set_mode((win_size, win_size + 200))
+pygame.display.set_caption('tic-tac-toe')
 
-background = transform.scale(image.load('background.jpg'), (win_width, win_height))
+# Загрузка и масштабирование изображений
+selection_bg = pygame.transform.scale(pygame.image.load('selection.jpg'), (win_size, win_size))
+background = pygame.transform.scale(pygame.image.load('background.jpg'), (win_size, win_size))
 clock = pygame.time.Clock()
 
-mixer.init()
-mixer.music.load('music.ogg')
-mixer.music.set_volume(.5)
-mixer.music.play()
+player = None # Переменная для хранения текущего игрока ('p1' для крестиков, 'p2' для ноликов)
+current_image = None # Изображение для текущего хода (крестик или нолик)
 
-fire_sound = mixer.Sound('fire.ogg')
+is_holding = False # Флаг для отслеживания удержания кнопки мыши (предотвращает множественные клики)
 
-font.init()
-font2 = font.Font(None, 36)
-font1 = font.Font(None, 80)
+# Отображаем экран выбора игрока
+window.blit(selection_bg, (0, 0))
 
-lost = 0
-score = 0
-max_lost = 3
-max_win = 25
+# Состояние игрового поля: 0 - пустая ячейка, 'p1' - крестик, 'p2' - нолик
+is_empty = [0, 0, 0, 0, 0, 0, 0, 0, 0]
+draw_count = 0 # Счетчик ходов, для определения ничьей
 
-life = 3
-life_color = (0, 0, 0)
+choosing = True # Флаг для цикла выбора игрока
+run = False # Флаг для основного игрового цикла
+game_over = False # Флаг для состояния "игра завершена"
+winner_text = "" # Переменная для текста о победителе/ничьей
+wins_cross = 0
+wins_circle = 0
 
-num_fire = 10
-rel_time = False
-last_time = False
-
-class GameSprite(sprite.Sprite):
-    def __init__(self, x, y, width, height, speed, img):
-        sprite.Sprite.__init__(self)
-        self.speed = speed
+class Button():
+    def __init__(self, x, y, width, height, img, mouse_btn):
         self.image = transform.scale(image.load(img), (width, height))
-        self.rect = speed
         self.rect = self.image.get_rect()
         self.rect.x = x
         self.rect.y = y
+        self.mouse_btn = int(mouse_btn)
+        self.holding = False
 
-    def reset(self):
+    def draw(self):
+        action = False
+        pos = pygame.mouse.get_pos()
+
+        if self.rect.collidepoint(pos) and pygame.mouse.get_pressed()[self.mouse_btn] and not self.holding:
+            self.holding = True
+            action = True
+        if pygame.mouse.get_pressed()[self.mouse_btn] == 0:
+            self.holding = False
+            action = False
+
         window.blit(self.image, (self.rect.x, self.rect.y))
+        return action
 
-class Player(GameSprite):
-    def update(self):
-        keys = key.get_pressed()
-        if keys[K_a] and self.rect.x > -25:
-            self.rect.x -= self.speed
-        if keys[K_d] and self.rect.x < win_width - 75:
-            self.rect.x += self.speed
+restart_btn = Button(300, 300, 20, 20, 'cross.png', 0)
 
-    def fire(self):
-        b = Bullet(self.rect.centerx, self.rect.top, 15, 40, 15, 'bullet.png')
-        bullets.add(b)
+# --- Цикл выбора игрока ---
+while choosing:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            choosing = False # Выходим из цикла выбора
+            run = False      # Устанавливаем run в False, чтобы игра не запускалась
+            game_over = False # Устанавливаем game_over в False
+            
+    pos = pygame.mouse.get_pos() # Получаем текущие координаты мыши
 
-class Enemy(GameSprite):
-    def update(self):
-        self.rect.y += self.speed
-        global lost
-        if self.rect.y > win_height:
-            self.rect.x = randint(80, win_width-80)
-            self.rect.y = 0
-            lost += 1
+    if pygame.mouse.get_pressed()[0] == 1: # Если нажата левая кнопка мыши
+        if not is_holding: # Проверяем, не удерживается ли кнопка с предыдущего кадра
+            is_holding = True # Устанавливаем флаг удержания
 
-class Bullet(GameSprite):
-    def update(self):
-        self.rect.y -= self.speed
-        if self.rect.y < 0:
-            self.kill()
+            if pos[0] >= 300: # Если клик был в правой половине экрана (выбор 'O')
+                player = 'p2' # Игрок 2 (нолик) ходит первым
+            else: # Если клик был в левой половине экрана (выбор 'X')
+                player = 'p1' # Игрок 1 (крестик) ходит первым
 
-player = Player(500, 600, 170, 120, 25, 'rocket.png')
+            choosing = False # Завершаем цикл выбора
+            run = True       # Начинаем основной игровой цикл
+    elif pygame.mouse.get_pressed()[0] == 0: # Если кнопка мыши отпущена
+        is_holding = False # Сбрасываем флаг удержания
 
-run = True
-finish = False
+    pygame.display.update()
+    clock.tick(60)
 
-monsters = sprite.Group()
-for i in range(5):
-    mnst = Enemy(randint(80, win_width-80), randint(175, 300), 70, 70, 2, 'monster.png')
-    monsters.add(mnst)
+# --- Подготовка к основному игровому циклу ---
+# Отображаем фон игрового поля, как только выбор игрока сделан
+window.blit(background, (0, 0))
 
-asteroids = sprite.Group()
-for i in range(3):
-    ast = Enemy(randint(30, win_width-30), -40, 70, 70, 3, 'asteroid.png')
-    asteroids.add(ast)
-
-bullets = sprite.Group()
-
+# --- Основной игровой цикл ---
 while run:
     for event in pygame.event.get():
-        if event.type == QUIT:
-            run = False
+        if event.type == pygame.QUIT:
+            run = False # Выход из игры
+            game_over = False # Устанавливаем game_over в False
 
-        elif event.type == KEYDOWN:
-            if event.key == K_SPACE:
-                if num_fire > 0 and not rel_time:
-                    num_fire -= 1
-                    fire_sound.play()
-                    player.fire()
-                if num_fire <= 0 and not rel_time:
-                    last_time = timer()
-                    rel_time = True
+    # Определяем, какое изображение использовать для текущего хода
+    if player == 'p1':
+        current_image = pygame.transform.scale(pygame.image.load('cross.png'), (100, 100))
+    else:
+        current_image = pygame.transform.scale(pygame.image.load('circle.png'), (100, 100))
 
-    if not finish:
-        window.blit(background, (0, 0))
+    pos = pygame.mouse.get_pos() # Получаем текущие координаты мыши
+    # Вычисляем индекс ячейки, на которую указывает мышь (0-8)
+    pos2 = pos[0] // 200 + pos[1] // 200 * 3 
 
-        text_score = font2.render('Рахунок: ' + str(score), True, (107, 255, 127))
-        window.blit(text_score, (10, 20))
+    if pygame.mouse.get_pressed()[0] == 1 and not is_holding: # Если нажата левая кнопка мыши и не удерживается
+        is_holding = True # Устанавливаем флаг удержания
 
-        text_lost = font2.render('Пропущено: ' + str(lost), True, (255, 127, 107))
-        window.blit(text_lost, (10, 70))
+        if not is_empty[pos2]: # Проверяем, что выбранная ячейка пуста
+            is_empty[pos2] = player # Записываем текущего игрока в массив состояния поля
+            # Отображаем изображение хода в центре соответствующей ячейки
+            window.blit(current_image, (pos[0] // 200 * 200 + 50, pos[1] // 200 * 200 + 50))
 
-        player.update()
-        monsters.update()
-        bullets.update()
-        asteroids.update()
+            print(is_empty) # Выводим состояние поля в консоль
+            draw_count += 1 # Увеличиваем счетчик ходов
+            print(draw_count)
 
-        if rel_time:
-            now_time = timer()
-            if now_time - last_time < 3:
-                reload = font1.render('wait, reloading...', True, (170, 0, 0))
-                window.blit(reload, (260, 460))
-            else:
-                rel_time = False
-                num_fire = 10
+            # --- Проверка условий победы ---
+            game_ended_this_turn = False # Флаг для отслеживания завершения игры в текущем ходе
 
-        player.reset()
-        monsters.draw(window)
-        bullets.draw(window)
-        asteroids.draw(window)
+            # Проверка по горизонталям
+            if is_empty[0:3] == [player, player, player]:
+                winner_text = f'ПЕРЕМІГ ГРАВЕЦЬ {player.upper()}!'
+                game_ended_this_turn = True
+            elif is_empty[3:6] == [player, player, player]:
+                winner_text = f'ПЕРЕМІГ ГРАВЕЦЬ {player.upper()}!'
+                game_ended_this_turn = True
+            elif is_empty[6:9] == [player, player, player]:
+                winner_text = f'ПЕРЕМІГ ГРАВЕЦЬ {player.upper()}!'
+                game_ended_this_turn = True
+            # Проверка по вертикалям
+            elif [is_empty[0], is_empty[3], is_empty[6]] == [player, player, player]:
+                winner_text = f'ПЕРЕМІГ ГРАВЕЦЬ {player.upper()}!'
+                game_ended_this_turn = True
+            elif [is_empty[1], is_empty[4], is_empty[7]] == [player, player, player]:
+                winner_text = f'ПЕРЕМІГ ГРАВЕЦЬ {player.upper()}!'
+                game_ended_this_turn = True
+            elif [is_empty[2], is_empty[5], is_empty[8]] == [player, player, player]:
+                winner_text = f'ПЕРЕМІГ ГРАВЕЦЬ {player.upper()}!'
+                game_ended_this_turn = True
+            # Проверка по диагоналям
+            elif [is_empty[0], is_empty[4], is_empty[8]] == [player, player, player]:
+                winner_text = f'ПЕРЕМІГ ГРАВЕЦЬ {player.upper()}!'
+                game_ended_this_turn = True
+            elif [is_empty[2], is_empty[4], is_empty[6]] == [player, player, player]:
+                winner_text = f'ПЕРЕМІГ ГРАВЕЦЬ {player.upper()}!'
+                game_ended_this_turn = True
+            # Проверка на ничью (только если игра не закончилась победой)
+            elif draw_count >= 9:
+                winner_text = 'НІЧИЯ!'
+                game_ended_this_turn = True
+            
+            # Если игра закончилась в этом ходу, устанавливаем флаги завершения
+            if game_ended_this_turn:
+                run = False # Выход из основного игрового цикла
+                game_over = True # Переход в состояние отображения результата
+                if player == 'p1':
+                    wins_cross += 1
+                else:
+                    wins_circle += 2
+            else: # Если никто не выиграл и игра не ничья, передаем ход другому игроку
+                if player == 'p1':
+                    player = 'p2'
+                else:
+                    player = 'p1'
 
-        collides = sprite.groupcollide(bullets, monsters, True, True)
-        for c in collides:
-            score += 1
-            m = Enemy(randint(80, win_width-80), randint(175, 300), 70, 70, 2, 'monster.png')
-            monsters.add(m)
+    # Сброс флага is_holding, когда кнопка мыши отпущена
+    if pygame.mouse.get_pressed()[0] == 0:
+        is_holding = False
 
-        if sprite.spritecollide(player, monsters, False) or sprite.spritecollide(player, asteroids, False):
-            life -= 1
-            sprite.spritecollide(player, monsters, True)
-            sprite.spritecollide(player, asteroids, True)
+    pygame.display.update() # Обновляем экран
+    clock.tick(60) # Устанавливаем FPS
 
-        if lost >= max_lost or life <= 0:
-            finish = True
-            lose_text = font1.render('YOU LOSE', True, (255, 0, 0))
-            window.blit(lose_text, (200, 200))
+restart_btn = Button(300, 300, 20, 20, 'cross.png', 0)
 
-        if score >= max_win:
-            finish = True
-            win_text = font1.render('YOU WIN', True, (0, 255, 0))
-            window.blit(win_text, (200, 200))
+while game_over:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            choosing = False # Выходим из цикла выбора
+            run = False      # Устанавливаем run в False, чтобы игра не запускалась
+            game_over = False # Устанавливаем game_over в False
 
-        if life == 3:
-            life_color = (0, 255, 0)
-        if life == 2:
-            life_color = (255, 255, 0)
-        if life == 1:
-            life_color = (255, 0, 0)
-        text_life = font1.render(str(life), True, life_color)
-        window.blit(text_life, (win_width-100, 20))
+    # Задаем шрифт для текста победителя
+    font = pygame.font.Font(None, 74) # Размер шрифта 74
 
-        display.update()
-    time.delay(50)
+    # Создаем текстовую поверхность
+    text_surface = font.render(winner_text, True, (255, 255, 255)) # Белый цвет текста
+    
+    # Получаем прямоугольник текста для центрирования
+    text_rect = text_surface.get_rect(center=(win_size // 2, win_size // 2))
+
+    # Очищаем экран и отображаем фон (или можно оставить игровое поле)
+    window.blit(background, (0, 0)) # Можно оставить текущее игровое поле или использовать новый фон
+    # window.fill((0, 0, 0)) # Или залить экран черным цветом, если хотите полностью черный фон
+
+    # Отображаем все текущие крестики и нолики, которые были на поле
+    # Это важно, чтобы поле не исчезло, когда появится текст
+    for i in range(9):
+        if is_empty[i] == 'p1':
+            img = pygame.transform.scale(pygame.image.load('cross.png'), (100, 100))
+        elif is_empty[i] == 'p2':
+            img = pygame.transform.scale(pygame.image.load('circle.png'), (100, 100))
+        else:
+            continue # Пропускаем пустые ячейки
+
+        row = i // 3
+        col = i % 3
+        window.blit(img, (col * 200 + 50, row * 200 + 50))
+
+    restart_btn.draw()
+    
+    # Отображаем текст победителя поверх всего
+    window.blit(text_surface, text_rect)
+    pygame.display.update()
+    clock.tick(60)  # Устанавливаем FPS
+
+pygame.quit() # Завершаем Pygame
